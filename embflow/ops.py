@@ -178,33 +178,172 @@ def segment(vectors, boundaries, meta=None):
     return segments
 
 
-def auto_segment(vectors, alpha=0.85, threshold="auto", meta=None):
+def auto_segment(vectors, alpha=0.85, threshold="auto", meta=None,
+                 recursive=True, min_segment_size=5,
+                 window_size=None, sensitivity=1.0):
     """Detect changepoints and segment automatically.
 
     Combines trajectory -> angular_velocity -> peaks -> segment.
+
+    When recursive=True (default), resets the trajectory at each
+    changepoint and recursively detects sub-changepoints within
+    each segment. This keeps the detector sensitive in long sequences
+    instead of letting the exponential smoothing absorb all variation.
 
     Parameters
     ----------
     vectors : ndarray of shape (n, d)
     alpha : float
         Exponential decay for trajectory computation.
-    threshold : float or "auto"
-        Peak detection threshold.
+    threshold : float, "auto", or "window"
+        Peak detection threshold. "window" uses sliding window method.
     meta : list of dicts, optional
+    recursive : bool
+        If True, reset trajectory at changepoints and recurse.
+    min_segment_size : int
+        Minimum segment size (won't split segments smaller than this).
+    window_size : int or None
+        Window size for "window" method. None = auto.
+    sensitivity : float
+        Threshold multiplier for "window" method. Lower = more changepoints.
 
     Returns
     -------
     list of segment dicts
     """
+    if isinstance(threshold, str) and threshold == "window":
+        boundaries = _window_changepoints(vectors, min_segment_size,
+                                          window_size=window_size,
+                                          sensitivity=sensitivity)
+        return segment(vectors, boundaries, meta)
+    elif recursive:
+        boundaries = _recursive_changepoints(
+            vectors, alpha, threshold, min_segment_size, offset=0
+        )
+        return segment(vectors, boundaries, meta)
+    else:
+        from embflow.lens import Exponential
+        traj = Exponential(alpha).trajectory(vectors)
+        angles = angular_velocity(traj)
+        boundaries = peaks(angles, threshold=threshold)
+        boundaries = [b + 1 for b in boundaries]
+        return segment(vectors, boundaries, meta)
+
+
+def _window_changepoints(vectors, min_size=5, window_size=None, sensitivity=1.0):
+    """Sliding window changepoint detection.
+
+    At each position j, compares the mean of a window before j to the
+    mean of a window after j. High divergence = changepoint.
+
+    This stays sensitive regardless of conversation length because
+    it only looks at local context, not cumulative history.
+
+    Parameters
+    ----------
+    window_size : int or None
+        Number of messages in each window. None = auto (min(n//8, 20)).
+    sensitivity : float
+        Threshold multiplier on std. Lower = more changepoints.
+    """
+    n = len(vectors)
+    if window_size is not None:
+        window = window_size
+    else:
+        # Empirically: local mean stabilizes at ~10 messages in 256-dim
+        # embedding space. Use this as fixed default, clamped to min_size.
+        window = max(10, min_size)
+
+    if n < window * 2:
+        return []
+
+    divergences = np.zeros(n)
+    for j in range(window, n - window):
+        before = vectors[j - window:j]
+        after = vectors[j:j + window]
+        mean_before = np.mean(before, axis=0)
+        mean_after = np.mean(after, axis=0)
+        nb = np.linalg.norm(mean_before)
+        na = np.linalg.norm(mean_after)
+        if nb > 0 and na > 0:
+            sim = float(_cosine_sim(
+                (mean_before / nb).reshape(1, -1),
+                (mean_after / na).reshape(1, -1)
+            )[0, 0])
+            divergences[j] = 1 - sim
+
+    # Find peaks above threshold
+    active = divergences[window:n - window]
+    if len(active) == 0:
+        return []
+    thresh = np.mean(active) + sensitivity * np.std(active)
+    thresh = max(thresh, 0.02)
+
+    peak_indices = []
+    for j in range(window, n - window):
+        if divergences[j] >= thresh:
+            # Local maximum check
+            local = divergences[max(0, j - min_size):min(n, j + min_size + 1)]
+            if divergences[j] >= np.max(local) - 1e-10:
+                if not peak_indices or j - peak_indices[-1] >= min_size:
+                    peak_indices.append(j)
+
+    return peak_indices
+
+
+def _recursive_changepoints(vectors, alpha, threshold, min_size, offset=0,
+                            global_threshold=None):
+    """Recursively detect changepoints with trajectory reset.
+
+    Finds the strongest changepoint, splits, then recurses into
+    each half. Returns absolute indices (adjusted by offset).
+
+    Uses a global threshold computed from the full sequence on the
+    first call, then applies it consistently to all sub-segments.
+    """
     from embflow.lens import Exponential
+
+    if len(vectors) < min_size * 2:
+        return []
+
     traj = Exponential(alpha).trajectory(vectors)
     angles = angular_velocity(traj)
-    boundaries = peaks(angles, threshold=threshold)
-    # Shift by 1 because angular_velocity[k] corresponds to the gap
-    # between trajectory[k] and trajectory[k+1], so the changepoint
-    # is at position k+1 in the original sequence
-    boundaries = [b + 1 for b in boundaries]
-    return segment(vectors, boundaries, meta)
+
+    if len(angles) == 0:
+        return []
+
+    # Compute global threshold on first call, reuse on recursion
+    if global_threshold is None:
+        if threshold == "auto":
+            global_threshold = np.mean(angles) + 1.0 * np.std(angles)
+        else:
+            global_threshold = threshold
+
+    # Find all peaks above the global threshold
+    peak_indices = [i for i, v in enumerate(angles)
+                    if v > max(global_threshold, 0.02)]
+
+    if not peak_indices:
+        return []
+
+    # Take the strongest peak
+    max_idx = max(peak_indices, key=lambda i: angles[i])
+    cp = max_idx + 1
+
+    if cp < min_size or len(vectors) - cp < min_size:
+        return []
+
+    # Recurse with the same global threshold
+    left_cps = _recursive_changepoints(
+        vectors[:cp], alpha, threshold, min_size,
+        offset=offset, global_threshold=global_threshold
+    )
+    right_cps = _recursive_changepoints(
+        vectors[cp:], alpha, threshold, min_size,
+        offset=offset + cp, global_threshold=global_threshold
+    )
+
+    return left_cps + [offset + cp] + right_cps
 
 
 def adaptive_alpha(vectors, alpha_range=(0.3, 0.99), step=0.05):
