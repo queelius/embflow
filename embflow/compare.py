@@ -42,6 +42,8 @@ def trajectory_distance(traj_a, traj_b, method="dtw", **kwargs):
     float
         Distance (0 = identical, higher = more different).
     """
+    if len(traj_a) == 0 or len(traj_b) == 0:
+        raise ValueError("trajectory_distance requires non-empty trajectories")
     if method == "dtw":
         return _dtw_distance(traj_a, traj_b)
     elif method == "resample":
@@ -58,7 +60,13 @@ def trajectory_distance(traj_a, traj_b, method="dtw", **kwargs):
 
 
 def _dtw_distance(a, b):
-    """Dynamic Time Warping distance using cosine distance."""
+    """Dynamic Time Warping distance using cosine distance.
+
+    Normalized by path length (n + m). When one input has a single
+    point, the only valid warping path has max(n, m) steps and the
+    result is effectively the mean cosine distance from that point
+    to every point in the longer sequence.
+    """
     n, m = len(a), len(b)
     # Cost matrix
     cost = np.full((n, m), np.inf)
@@ -85,34 +93,17 @@ def _resample_distance(a, b, k=20):
 
 
 def _frechet_distance(a, b):
-    """Discrete Frechet distance (minimax leash length)."""
+    """Discrete Frechet distance (minimax leash length).
+
+    Iterative bottom-up DP; dp[i, j] is the minimum over all monotone
+    coupling paths ending at (i, j) of the max cosine distance on the path.
+    """
     n, m = len(a), len(b)
-    dp = np.full((n, m), -1.0)
+    dp = np.empty((n, m))
 
-    def _dist(i, j):
-        return _cosine_dist(a[i], b[j])
-
-    def _frechet_rec(i, j):
-        if dp[i, j] >= 0:
-            return dp[i, j]
-        d = _dist(i, j)
-        if i == 0 and j == 0:
-            dp[i, j] = d
-        elif i == 0:
-            dp[i, j] = max(_frechet_rec(0, j - 1), d)
-        elif j == 0:
-            dp[i, j] = max(_frechet_rec(i - 1, 0), d)
-        else:
-            dp[i, j] = max(
-                min(_frechet_rec(i - 1, j), _frechet_rec(i - 1, j - 1), _frechet_rec(i, j - 1)),
-                d
-            )
-        return dp[i, j]
-
-    # Iterative to avoid recursion limit
     for i in range(n):
         for j in range(m):
-            d = _dist(i, j)
+            d = _cosine_dist(a[i], b[j])
             if i == 0 and j == 0:
                 dp[i, j] = d
             elif i == 0:
@@ -151,10 +142,10 @@ def _endpoint_distance(a, b):
 
 
 def continuation_score(vectors_a, vectors_b, alpha=0.85):
-    """Score how well conversation B continues from conversation A.
+    """Score how well sequence B continues from sequence A.
 
-    Compares the exponential end of A with the exponential start of B.
-    High score = B picks up where A left off.
+    Compares the recency-weighted end of A with the primacy-weighted
+    start of B. High score = B picks up where A left off.
 
     Parameters
     ----------
@@ -164,12 +155,18 @@ def continuation_score(vectors_a, vectors_b, alpha=0.85):
     Returns
     -------
     float
-        Cosine similarity (0 to 1, higher = stronger continuation).
+        Cosine similarity (-1 to 1, higher = stronger continuation).
     """
-    from embflow.lens import Exponential, ReverseExponential
+    from embflow.weights import (
+        exponential_weights,
+        reverse_exponential_weights,
+        weighted_mean,
+    )
 
-    end_a = Exponential(alpha).project(vectors_a)
-    start_b = ReverseExponential(alpha).project(vectors_b)
-    return float(_cosine_sim(
-        end_a.reshape(1, -1), start_b.reshape(1, -1)
-    )[0, 0])
+    if len(vectors_a) == 0 or len(vectors_b) == 0:
+        raise ValueError("continuation_score requires non-empty sequences")
+    end_a = weighted_mean(vectors_a, exponential_weights(len(vectors_a), alpha))
+    start_b = weighted_mean(
+        vectors_b, reverse_exponential_weights(len(vectors_b), alpha)
+    )
+    return 1 - _cosine_dist(end_a, start_b)

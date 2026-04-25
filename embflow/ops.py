@@ -1,10 +1,22 @@
-"""Sequence operations: derivatives, segmentation, and analysis.
+"""Differential and geometric operators for trajectories in embedding space.
 
-These operate on sequences of vectors (typically trajectories produced
-by lens.trajectory(), but also raw embedding sequences).
+Input is an (n, d) ndarray: a sequence of d-dimensional vectors treated
+as a path in R^d. Inputs can be raw embeddings or smoothed trajectories
+from ``embflow.smooth``. Operators cover first/second/third derivatives,
+arc-length and turning rate, second-order structure (local curvature
+radius and velocity covariance), segmentation, and adaptive analysis.
 """
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity as _cosine_sim
+
+from embflow.smooth import smooth_exponential
+from embflow.weights import (
+    exponential_weights,
+    novelty_weights,
+    reverse_exponential_weights,
+    uniform_weights,
+    weighted_mean,
+)
 
 
 def _normalize(v):
@@ -12,15 +24,26 @@ def _normalize(v):
     return v / n if n > 0 else v
 
 
+def _cos_sim_scalar(a, b):
+    """Scalar cosine similarity between two 1D vectors."""
+    return float(_cosine_sim(a.reshape(1, -1), b.reshape(1, -1))[0, 0])
+
+
+def _auto_threshold(signal, k=1.5):
+    """Automatic threshold: mean + k * std of the signal.
+
+    The default multiplier (k=1.5) matches scipy-style peak pickers.
+    Callers that want a less strict default pass a smaller k.
+    """
+    return float(np.mean(signal) + k * np.std(signal))
+
+
+# === Differential operators ===
+
 def velocity(trajectory):
-    """First derivative: direction and magnitude of change at each step.
+    """First difference: displacement between consecutive points.
 
-    For a trajectory t_0, t_1, ..., t_{n-1}, returns:
-        v_k = t_{k+1} - t_k   for k = 0..n-2
-
-    The velocity vectors live in "transition space": similarity between
-    velocity vectors means "changing in the same way," independent of
-    what the embeddings are about.
+    v_k = trajectory[k+1] - trajectory[k]   for k = 0..n-2
 
     Parameters
     ----------
@@ -34,9 +57,11 @@ def velocity(trajectory):
 
 
 def curvature(trajectory):
-    """Second derivative: rate of change of direction.
+    """Second difference: rate of change of direction.
 
-    High curvature = the trajectory is turning sharply (changepoint).
+    c_k = trajectory[k+2] - 2*trajectory[k+1] + trajectory[k]
+
+    High-magnitude curvature = the trajectory is turning sharply.
 
     Parameters
     ----------
@@ -49,8 +74,25 @@ def curvature(trajectory):
     return np.diff(trajectory, n=2, axis=0)
 
 
+def jerk(trajectory):
+    """Third difference: rate of change of curvature.
+
+    Sensitive to the sharpest local changes, more so than curvature
+    because it measures how suddenly the bending itself changes.
+
+    Parameters
+    ----------
+    trajectory : ndarray of shape (n, d)
+
+    Returns
+    -------
+    ndarray of shape (n-3, d)
+    """
+    return np.diff(trajectory, n=3, axis=0)
+
+
 def speed(trajectory):
-    """Scalar speed at each step: magnitude of velocity.
+    """Scalar speed at each step: ||velocity||.
 
     Parameters
     ----------
@@ -60,15 +102,16 @@ def speed(trajectory):
     -------
     ndarray of shape (n-1,)
     """
-    vel = velocity(trajectory)
-    return np.linalg.norm(vel, axis=1)
+    return np.linalg.norm(velocity(trajectory), axis=1)
 
 
 def angular_velocity(trajectory):
-    """Angular change between consecutive steps.
+    """Angular change between consecutive trajectory points.
 
-    Measures the cosine distance between consecutive trajectory points.
-    Equivalent to 1 - cos(t_k, t_{k+1}).
+    a_k = 1 - cos(trajectory[k], trajectory[k+1])
+
+    For a unit-normalized trajectory, this is a measure of how much
+    the position on the unit sphere rotates between steps.
 
     Parameters
     ----------
@@ -81,16 +124,38 @@ def angular_velocity(trajectory):
     n = len(trajectory)
     angles = np.empty(n - 1)
     for k in range(n - 1):
-        sim = float(_cosine_sim(
-            trajectory[k].reshape(1, -1),
-            trajectory[k + 1].reshape(1, -1)
-        )[0, 0])
-        angles[k] = 1 - sim
+        angles[k] = 1 - _cos_sim_scalar(trajectory[k], trajectory[k + 1])
     return angles
 
 
+# === Global and second-order geometric measures ===
+
+def arc_length(trajectory):
+    """Cumulative path length along the trajectory.
+
+    Returns a (n,) array where result[k] is the total Euclidean distance
+    traveled from trajectory[0] to trajectory[k]. result[0] = 0.
+
+    Euclidean distance is used throughout; for unit-normalized
+    trajectories, segment distances relate to angles on the unit
+    sphere via |u - v| = 2 sin(theta/2).
+
+    Parameters
+    ----------
+    trajectory : ndarray of shape (n, d)
+
+    Returns
+    -------
+    ndarray of shape (n,)
+    """
+    if len(trajectory) < 2:
+        return np.zeros(len(trajectory))
+    segments = np.linalg.norm(np.diff(trajectory, axis=0), axis=1)
+    return np.concatenate([[0.0], np.cumsum(segments)])
+
+
 def drift(trajectory):
-    """Total semantic drift: cosine distance from first to last point.
+    """Cosine distance from the first to the last trajectory point.
 
     Parameters
     ----------
@@ -102,48 +167,117 @@ def drift(trajectory):
     """
     if len(trajectory) < 2:
         return 0.0
-    return 1 - float(_cosine_sim(
-        trajectory[0].reshape(1, -1),
-        trajectory[-1].reshape(1, -1)
-    )[0, 0])
+    return 1 - _cos_sim_scalar(trajectory[0], trajectory[-1])
 
+
+def local_curvature_radius(trajectory, eps=1e-12):
+    """Radius of the osculating circle through each triple of consecutive points.
+
+    Uses the three-point circumradius formula R = abc / (4 * area),
+    with Heron's formula for area. Works in any dimension because
+    three points always span a plane.
+
+    Large values indicate a nearly straight local path; small values
+    indicate a sharp local bend. Collinear triples produce +inf.
+
+    Parameters
+    ----------
+    trajectory : ndarray of shape (n, d)
+    eps : float
+        Area threshold below which the triple is treated as collinear.
+
+    Returns
+    -------
+    ndarray of shape (n-2,)
+    """
+    n = len(trajectory)
+    if n < 3:
+        return np.zeros(0)
+    a = np.linalg.norm(trajectory[1:n - 1] - trajectory[2:n], axis=1)
+    b = np.linalg.norm(trajectory[0:n - 2] - trajectory[2:n], axis=1)
+    c = np.linalg.norm(trajectory[0:n - 2] - trajectory[1:n - 1], axis=1)
+    s = (a + b + c) / 2
+    # Clamp Heron under the sqrt to guard against floating-point negatives.
+    area = np.sqrt(np.maximum(s * (s - a) * (s - b) * (s - c), 0.0))
+    radius = np.where(area > eps, (a * b * c) / (4 * np.maximum(area, eps)), np.inf)
+    return radius
+
+
+def velocity_covariance(trajectory, window=5):
+    """Local outer-product structure tensor of velocity vectors.
+
+    For each velocity step k, computes ``sum_i v_i v_i^T / count`` over
+    the window of velocity vectors centered at k. The top eigenvector
+    of the resulting (d, d) matrix is the dominant direction of local
+    motion; the eigenvalue spectrum indicates how concentrated motion
+    is along that direction (rank-1 means unidirectional flow; flat
+    spectrum means diffuse motion).
+
+    Parameters
+    ----------
+    trajectory : ndarray of shape (n, d)
+    window : int
+        Half-width of the window. Each result[k] aggregates velocity
+        vectors in indices [max(0, k-window), min(n_vel, k+window+1)).
+
+    Returns
+    -------
+    ndarray of shape (n-1, d, d)
+    """
+    vel = np.diff(trajectory, axis=0)
+    n_vel, d = vel.shape
+    result = np.empty((n_vel, d, d))
+    for k in range(n_vel):
+        lo = max(0, k - window)
+        hi = min(n_vel, k + window + 1)
+        local = vel[lo:hi]
+        result[k] = local.T @ local / max(len(local), 1)
+    return result
+
+
+# === Segmentation ===
 
 def peaks(signal, threshold="auto", min_distance=1):
     """Find peak indices in a 1D signal.
 
     Used to find changepoints from angular_velocity or speed signals.
 
+    When ``min_distance`` would exclude some candidates, the STRONGER
+    peak wins: candidates are resolved greedily in descending magnitude,
+    matching scipy/matlab conventions.
+
     Parameters
     ----------
     signal : ndarray of shape (n,)
         1D signal (e.g., angular velocity, speed, curvature magnitude).
     threshold : float or "auto"
-        Minimum peak height. "auto" = mean + 1.5 * std.
+        Minimum peak height. "auto" = mean + 1.5 * std (floored at 0.05).
     min_distance : int
-        Minimum distance between peaks.
+        Minimum distance between returned peak indices.
 
     Returns
     -------
     list of int
-        Indices of peaks.
+        Indices of selected peaks, sorted ascending.
     """
     if len(signal) == 0:
         return []
     if threshold == "auto":
-        threshold = np.mean(signal) + 1.5 * np.std(signal)
-    min_abs = 0.05  # minimum absolute threshold
+        threshold = _auto_threshold(signal, k=1.5)
+    # Minimum absolute threshold floor.
+    effective = max(threshold, 0.05)
 
-    candidates = [i for i, v in enumerate(signal) if v > max(threshold, min_abs)]
-
-    # Enforce minimum distance
-    if min_distance > 1 and candidates:
-        filtered = [candidates[0]]
-        for c in candidates[1:]:
-            if c - filtered[-1] >= min_distance:
-                filtered.append(c)
-        candidates = filtered
-
-    return candidates
+    above = [i for i, v in enumerate(signal) if v > effective]
+    if not above or min_distance <= 1:
+        return above
+    # Greedy-select by descending magnitude with min_distance constraint.
+    above.sort(key=lambda i: signal[i], reverse=True)
+    selected = []
+    for i in above:
+        if all(abs(i - j) >= min_distance for j in selected):
+            selected.append(i)
+    selected.sort()
+    return selected
 
 
 def segment(vectors, boundaries, meta=None):
@@ -168,13 +302,12 @@ def segment(vectors, boundaries, meta=None):
         start, end = bounds[i], bounds[i + 1]
         if end <= start:
             continue
-        seg = {
+        segments.append({
             "vectors": vectors[start:end],
             "meta": meta[start:end] if meta else None,
             "start": start,
             "end": end,
-        }
-        segments.append(seg)
+        })
     return segments
 
 
@@ -183,35 +316,44 @@ def auto_segment(vectors, alpha=0.85, threshold="auto", meta=None,
                  window_size=None, sensitivity=1.0):
     """Detect changepoints and segment automatically.
 
-    Combines trajectory -> angular_velocity -> peaks -> segment.
+    Combines smooth_exponential -> angular_velocity -> peaks -> segment.
 
-    When recursive=True (default), resets the trajectory at each
-    changepoint and recursively detects sub-changepoints within
-    each segment. This keeps the detector sensitive in long sequences
-    instead of letting the exponential smoothing absorb all variation.
+    Two strategies are available, selected by ``threshold``:
+
+    - Trajectory-based (default): uses an exponentially-smoothed
+      trajectory and picks peaks in its angular velocity. If
+      ``recursive=True`` (default), splits at the strongest peak and
+      recurses into each half, keeping the detector sensitive even
+      on long sequences.
+    - Sliding window (``threshold="window"``): compares local means
+      on each side of every candidate position. This path OVERRIDES
+      ``recursive`` and does not use ``alpha``.
 
     Parameters
     ----------
     vectors : ndarray of shape (n, d)
     alpha : float
-        Exponential decay for trajectory computation.
+        Exponential smoothing factor. Ignored when threshold == "window".
     threshold : float, "auto", or "window"
-        Peak detection threshold. "window" uses sliding window method.
+        Peak detection threshold, or the literal "window" to select the
+        sliding-window strategy.
     meta : list of dicts, optional
     recursive : bool
-        If True, reset trajectory at changepoints and recurse.
+        If True, reset trajectory at changepoints and recurse. Ignored
+        when threshold == "window".
     min_segment_size : int
-        Minimum segment size (won't split segments smaller than this).
+        Minimum segment size (smaller segments are not further split).
     window_size : int or None
-        Window size for "window" method. None = auto.
+        Window size for the "window" method. None = auto (~10 items).
     sensitivity : float
-        Threshold multiplier for "window" method. Lower = more changepoints.
+        Threshold multiplier for the "window" method. Lower = more
+        changepoints. Ignored unless threshold == "window".
 
     Returns
     -------
     list of segment dicts
     """
-    if isinstance(threshold, str) and threshold == "window":
+    if threshold == "window":
         boundaries = _window_changepoints(vectors, min_segment_size,
                                           window_size=window_size,
                                           sensitivity=sensitivity)
@@ -222,27 +364,25 @@ def auto_segment(vectors, alpha=0.85, threshold="auto", meta=None,
         )
         return segment(vectors, boundaries, meta)
     else:
-        from embflow.lens import Exponential
-        traj = Exponential(alpha).trajectory(vectors)
+        traj = smooth_exponential(vectors, alpha)
         angles = angular_velocity(traj)
-        boundaries = peaks(angles, threshold=threshold)
-        boundaries = [b + 1 for b in boundaries]
+        boundaries = [b + 1 for b in peaks(angles, threshold=threshold)]
         return segment(vectors, boundaries, meta)
 
 
 def _window_changepoints(vectors, min_size=5, window_size=None, sensitivity=1.0):
-    """Sliding window changepoint detection.
+    """Sliding-window changepoint detection.
 
     At each position j, compares the mean of a window before j to the
     mean of a window after j. High divergence = changepoint.
 
-    This stays sensitive regardless of conversation length because
-    it only looks at local context, not cumulative history.
+    This stays sensitive regardless of sequence length because it only
+    looks at local context, not cumulative history.
 
     Parameters
     ----------
     window_size : int or None
-        Number of messages in each window. None = auto (min(n//8, 20)).
+        Number of items in each window. None = auto (max(10, min_size)).
     sensitivity : float
         Threshold multiplier on std. Lower = more changepoints.
     """
@@ -250,8 +390,8 @@ def _window_changepoints(vectors, min_size=5, window_size=None, sensitivity=1.0)
     if window_size is not None:
         window = window_size
     else:
-        # Empirically: local mean stabilizes at ~10 messages in 256-dim
-        # embedding space. Use this as fixed default, clamped to min_size.
+        # Empirically: local mean stabilizes at ~10 items in 256-dim
+        # embedding space. Fixed default, clamped to min_size.
         window = max(10, min_size)
 
     if n < window * 2:
@@ -259,30 +399,22 @@ def _window_changepoints(vectors, min_size=5, window_size=None, sensitivity=1.0)
 
     divergences = np.zeros(n)
     for j in range(window, n - window):
-        before = vectors[j - window:j]
-        after = vectors[j:j + window]
-        mean_before = np.mean(before, axis=0)
-        mean_after = np.mean(after, axis=0)
-        nb = np.linalg.norm(mean_before)
-        na = np.linalg.norm(mean_after)
-        if nb > 0 and na > 0:
-            sim = float(_cosine_sim(
-                (mean_before / nb).reshape(1, -1),
-                (mean_after / na).reshape(1, -1)
-            )[0, 0])
-            divergences[j] = 1 - sim
+        mean_before = np.mean(vectors[j - window:j], axis=0)
+        mean_after = np.mean(vectors[j:j + window], axis=0)
+        if np.linalg.norm(mean_before) > 0 and np.linalg.norm(mean_after) > 0:
+            divergences[j] = 1 - _cos_sim_scalar(
+                _normalize(mean_before), _normalize(mean_after)
+            )
 
-    # Find peaks above threshold
     active = divergences[window:n - window]
     if len(active) == 0:
         return []
-    thresh = np.mean(active) + sensitivity * np.std(active)
-    thresh = max(thresh, 0.02)
+    thresh = max(_auto_threshold(active, k=sensitivity), 0.02)
 
     peak_indices = []
     for j in range(window, n - window):
         if divergences[j] >= thresh:
-            # Local maximum check
+            # Local-maximum check.
             local = divergences[max(0, j - min_size):min(n, j + min_size + 1)]
             if divergences[j] >= np.max(local) - 1e-10:
                 if not peak_indices or j - peak_indices[-1] >= min_size:
@@ -295,45 +427,43 @@ def _recursive_changepoints(vectors, alpha, threshold, min_size, offset=0,
                             global_threshold=None):
     """Recursively detect changepoints with trajectory reset.
 
-    Finds the strongest changepoint, splits, then recurses into
-    each half. Returns absolute indices (adjusted by offset).
+    Finds the strongest changepoint, splits, then recurses into each
+    half. Returns absolute indices (adjusted by offset).
 
-    Uses a global threshold computed from the full sequence on the
-    first call, then applies it consistently to all sub-segments.
+    Uses a global threshold computed from the full sequence on the first
+    call, then applies it consistently to all sub-segments.
     """
-    from embflow.lens import Exponential
-
     if len(vectors) < min_size * 2:
         return []
 
-    traj = Exponential(alpha).trajectory(vectors)
+    traj = smooth_exponential(vectors, alpha)
     angles = angular_velocity(traj)
 
     if len(angles) == 0:
         return []
 
-    # Compute global threshold on first call, reuse on recursion
+    # Compute global threshold on first call, reuse on recursion.
+    # The k=1.0 multiplier is laxer than peaks()' k=1.5 because recursive
+    # descent uses "at least one peak above threshold" as a split gate
+    # and then picks the strongest, so a more permissive gate is right.
     if global_threshold is None:
         if threshold == "auto":
-            global_threshold = np.mean(angles) + 1.0 * np.std(angles)
+            global_threshold = _auto_threshold(angles, k=1.0)
         else:
             global_threshold = threshold
 
-    # Find all peaks above the global threshold
     peak_indices = [i for i, v in enumerate(angles)
                     if v > max(global_threshold, 0.02)]
 
     if not peak_indices:
         return []
 
-    # Take the strongest peak
     max_idx = max(peak_indices, key=lambda i: angles[i])
     cp = max_idx + 1
 
     if cp < min_size or len(vectors) - cp < min_size:
         return []
 
-    # Recurse with the same global threshold
     left_cps = _recursive_changepoints(
         vectors[:cp], alpha, threshold, min_size,
         offset=offset, global_threshold=global_threshold
@@ -346,12 +476,17 @@ def _recursive_changepoints(vectors, alpha, threshold, min_size, offset=0,
     return left_cps + [offset + cp] + right_cps
 
 
+# === Adaptive analysis ===
+
 def adaptive_alpha(vectors, alpha_range=(0.3, 0.99), step=0.05):
     """Estimate the optimal alpha for a sequence.
 
     Finds the alpha that best predicts the next vector from the
-    exponential trajectory. This measures the natural "memory length"
-    of the sequence.
+    exponentially-smoothed trajectory. Measures the natural
+    "memory length" of the sequence.
+
+    On ties (e.g., a near-constant sequence where every alpha predicts
+    perfectly), returns the grid value closest to the default 0.85.
 
     Parameters
     ----------
@@ -362,66 +497,71 @@ def adaptive_alpha(vectors, alpha_range=(0.3, 0.99), step=0.05):
     Returns
     -------
     float
-        Optimal alpha.
+        Optimal alpha, guaranteed within [alpha_range[0], alpha_range[1]].
     """
-    from embflow.lens import Exponential
-
     if len(vectors) < 5:
         return 0.85
 
-    best_alpha = 0.85
-    best_score = -1
+    # np.arange can overshoot the upper bound by a float epsilon; clamp.
+    grid = np.arange(alpha_range[0], alpha_range[1] + step / 2, step)
+    grid = np.minimum(grid, alpha_range[1])
 
-    for alpha in np.arange(alpha_range[0], alpha_range[1] + step / 2, step):
-        traj = Exponential(alpha).trajectory(vectors)
-        # How well does traj[j] predict vectors[j+1]?
-        pred_sims = []
-        for j in range(len(vectors) - 1):
-            s = float(_cosine_sim(
-                traj[j].reshape(1, -1),
-                vectors[j + 1].reshape(1, -1)
-            )[0, 0])
-            pred_sims.append(s)
-        score = np.mean(pred_sims)
-        if score > best_score:
-            best_score = score
-            best_alpha = alpha
+    scores = np.empty(len(grid))
+    for idx, alpha in enumerate(grid):
+        traj = smooth_exponential(vectors, alpha)
+        scores[idx] = np.mean([
+            _cos_sim_scalar(traj[j], vectors[j + 1])
+            for j in range(len(vectors) - 1)
+        ])
 
-    return float(best_alpha)
+    best = scores.max()
+    tied = np.flatnonzero(scores >= best - 1e-9)
+    # Tiebreak toward the default 0.85.
+    idx = tied[np.argmin(np.abs(grid[tied] - 0.85))]
+    return float(grid[idx])
 
 
-def structural_richness(vectors, lenses=None, meta=None):
-    """Inter-lens divergence: how much do different lenses disagree?
+def structural_richness(vectors, weight_fns=None, meta=None):
+    """Inter-projection divergence: how much do different weightings disagree?
 
-    High richness = the conversation's structure matters (start, end,
-    surprises all point in different directions).
-    Low richness = semantically uniform (all lenses agree).
+    Computes the mean pairwise cosine distance over a set of weighted
+    projections of the sequence. High richness = position within the
+    sequence matters (different weightings point in different
+    directions). Low richness = semantically uniform.
+
+    Cost note: each projection is a full fold over ``vectors``; the
+    default set includes ``novelty_weights`` which runs an O(n*d) loop.
+    On long sequences this compounds quickly.
 
     Parameters
     ----------
     vectors : ndarray of shape (n, d)
-    lenses : list of Lens, optional
-        Default: [Uniform, Exponential(0.85), ReverseExponential(0.85), Surprise]
+    weight_fns : list of callables, optional
+        Each callable takes ``(vectors, meta)`` and returns an (n,)
+        weight array. Default:
+            uniform, exponential(0.85), reverse_exponential(0.85), novelty.
     meta : list of dicts, optional
 
     Returns
     -------
     float
-        Mean pairwise cosine distance between lens projections.
+        Mean pairwise cosine distance between the weighted projections.
     """
-    from embflow.lens import Uniform, Exponential, ReverseExponential, Surprise
-
-    if lenses is None:
-        lenses = [Uniform(), Exponential(0.85), ReverseExponential(0.85), Surprise()]
-
-    projections = np.array([lens.project(vectors, meta) for lens in lenses])
+    if len(vectors) == 0:
+        raise ValueError("structural_richness requires at least one vector")
+    if weight_fns is None:
+        weight_fns = [
+            lambda v, m: uniform_weights(len(v)),
+            lambda v, m: exponential_weights(len(v), 0.85),
+            lambda v, m: reverse_exponential_weights(len(v), 0.85),
+            lambda v, m: novelty_weights(v),
+        ]
+    projections = np.array([
+        weighted_mean(vectors, wf(vectors, meta)) for wf in weight_fns
+    ])
+    n_projs = len(projections)
+    if n_projs < 2:
+        return 0.0
     sim = _cosine_sim(projections)
-    n = len(lenses)
-    # Mean pairwise distance
-    total = 0
-    count = 0
-    for i in range(n):
-        for j in range(i + 1, n):
-            total += (1 - sim[i, j])
-            count += 1
-    return total / count if count > 0 else 0.0
+    i, j = np.triu_indices(n_projs, k=1)
+    return float(np.mean(1 - sim[i, j]))

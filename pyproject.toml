@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "embflow"
 dynamic = ["version"]
-description = "A calculus over embedding sequences: lenses, trajectories, derivatives, and segmentation."
+description = "A calculus over embedding sequences: weighted folds, smoothers, differential operators, and trajectory distance."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"

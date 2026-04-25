@@ -1,43 +1,52 @@
-"""embflow: A calculus over embedding sequences.
+"""embflow: a calculus over embedding sequences.
 
-Operations on ordered sequences of embedding vectors: projection (fold),
-trajectory (scan), derivatives (velocity, curvature), segmentation,
-and comparison. Lenses are composable weight functions that control
-how sequences aggregate.
+Treats an ordered sequence of embedding vectors as a path in R^d.
+Provides weighted folds, scan-style smoothing, differential operators
+(velocity, curvature, jerk, angular velocity, speed), second-order
+geometry (arc length, local curvature radius, velocity covariance),
+segmentation, and trajectory distance.
 
-Core types:
-    Item     = (vector, metadata)
-    Seq      = ordered sequence of Items
-    Lens     = weight function family, composable via *
+Primary object: an (n, d) ndarray representing a sequence of vectors.
 
 Core operations:
-    lens.project(vectors, meta)     -> vector (fold)
-    lens.trajectory(vectors, meta)  -> vectors (scan)
-    velocity(trajectory)            -> vectors (1st derivative)
-    curvature(trajectory)           -> vectors (2nd derivative)
-    segment(vectors, boundaries)    -> list of vector arrays
-    drift(trajectory)               -> float
-    adaptive_alpha(vectors)         -> float
+    weighted_mean(vectors, weights)         -> vector (fold)
+    smooth_exponential(vectors, alpha)      -> vectors (O(n) scan)
+    velocity / curvature / jerk             -> differential operators
+    arc_length / speed / angular_velocity   -> scalar path metrics
+    local_curvature_radius                  -> osculating-circle radius
+    velocity_covariance                     -> local structure tensor
+    trajectory_distance(a, b, method=...)   -> distance between two paths
+    continuation_score(a, b)                -> does B pick up where A left off?
 """
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
-from embflow.lens import (
-    Lens,
-    Uniform,
-    Exponential,
-    ReverseExponential,
-    Gaussian,
-    Surprise,
-    FieldWeight,
-    TimeDecay,
-    Custom,
+from embflow.weights import (
+    uniform_weights,
+    exponential_weights,
+    reverse_exponential_weights,
+    gaussian_weights,
+    time_decay_weights,
+    field_weights,
+    novelty_weights,
+    weighted_mean,
+)
+from embflow.smooth import (
+    smooth_uniform,
+    smooth_exponential,
+    smooth_reverse_exponential,
+    smooth_gaussian,
+    smooth_time_decay,
 )
 from embflow.ops import (
     velocity,
     curvature,
+    jerk,
     speed,
     angular_velocity,
+    arc_length,
     drift,
+    local_curvature_radius,
+    velocity_covariance,
     peaks,
     segment,
     auto_segment,
