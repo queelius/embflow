@@ -167,6 +167,71 @@ def turning_cosines(trajectory):
     return out
 
 
+def tortuosity(trajectory, window=8):
+    """Mean over sliding windows of (net displacement / path length).
+
+    1.0 = perfectly directed over each window; near 0 = the path mostly
+    backtracks. Ported from the embedding-dynamics motionlib (validated
+    2026-06-10: real conversations are more directed than shuffled,
+    paired Cohen's d = +1.39).
+
+    Parameters
+    ----------
+    trajectory : ndarray of shape (n, d)
+    window : int
+        Window length in steps; clamped to n-1.
+
+    Returns
+    -------
+    float, NaN when fewer than 2 steps or all windows are stationary.
+    """
+    trajectory = np.asarray(trajectory, dtype=float)
+    n = len(trajectory)
+    if n - 1 < 2:
+        return float("nan")
+    w = min(window, n - 1)
+    s = speed(trajectory)
+    nets = np.linalg.norm(trajectory[w:] - trajectory[:-w], axis=1)
+    csum = np.concatenate([[0.0], np.cumsum(s)])
+    paths = csum[w:] - csum[:-w]
+    ok = paths > EPS
+    if not ok.any():
+        return float("nan")
+    return float((nets[ok] / paths[ok]).mean())
+
+
+def _lag_autocorr(signal, lag=1):
+    """Lag-k autocorrelation of a 1D signal; NaN entries dropped first.
+
+    NaN when fewer than lag+2 finite values or the signal is constant.
+    """
+    x = signal[~np.isnan(signal)]
+    if len(x) < lag + 2 or x.std() < EPS:
+        return float("nan")
+    return float(np.corrcoef(x[:-lag], x[lag:])[0, 1])
+
+
+def speed_autocorr(trajectory, lag=1):
+    """Lag-k autocorrelation of the speed series ||v_k||.
+
+    Measures burstiness of motion: do large steps cluster? CAUTION
+    (validated 2026-06-10): this is NOT a pure order statistic — message
+    eccentricity makes both adjacent steps large regardless of order, so
+    even the exchangeable null has positive speed autocorrelation.
+    Report it null-corrected (see ``embflow.nulls.null_corrected``).
+
+    Parameters
+    ----------
+    trajectory : ndarray of shape (n, d)
+    lag : int
+
+    Returns
+    -------
+    float, NaN on degenerate input.
+    """
+    return _lag_autocorr(speed(np.asarray(trajectory, dtype=float)), lag)
+
+
 # === Global and second-order geometric measures ===
 
 def arc_length(trajectory):

@@ -51,6 +51,8 @@ from embflow.ops import (
     speed,
     angular_velocity,
     turning_cosines,
+    tortuosity,
+    speed_autocorr,
     arc_length,
     drift,
     local_curvature_radius,
