@@ -67,6 +67,8 @@ def cached_embed_fn(embed_fn, cache_path, namespace):
     Returns
     -------
     EmbedFn that consults the cache first and embeds only misses.
+    Empty input returns a (0, 0) array (the dimension is unknowable
+    without embedding something).
     """
     db = sqlite3.connect(str(cache_path))
     db.execute("CREATE TABLE IF NOT EXISTS emb (key TEXT PRIMARY KEY, vec BLOB)")
@@ -88,6 +90,10 @@ def cached_embed_fn(embed_fn, cache_path, namespace):
                 missing.append(i)
         if missing:
             vecs = np.asarray(embed_fn([texts[i] for i in missing]), dtype=np.float32)
+            if len(vecs) != len(missing):
+                raise ValueError(
+                    f"embed_fn returned {len(vecs)} rows for {len(missing)} texts"
+                )
             for i, v in zip(missing, vecs):
                 db.execute(
                     "INSERT OR REPLACE INTO emb VALUES (?, ?)",

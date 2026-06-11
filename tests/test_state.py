@@ -41,6 +41,15 @@ class TestLeakyState:
         with pytest.raises(ValueError):
             ef.leaky_state(vectors, 0.85, masses=np.ones(3))
 
+    def test_alpha_out_of_domain_raises(self, vectors):
+        """Documented domain is (0, 1]; enforce it for state and readout."""
+        for bad in [0.0, -0.5, 1.5]:
+            with pytest.raises(ValueError):
+                ef.leaky_state(vectors, alpha=bad)
+            with pytest.raises(ValueError):
+                ef.trajectory(vectors, alpha=bad)
+        ef.trajectory(vectors, alpha=1.0)  # boundary is valid (running mean)
+
 
 class TestTrajectory:
     def test_is_normalized_leaky_state(self, vectors):

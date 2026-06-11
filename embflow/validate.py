@@ -178,9 +178,19 @@ def prefix_experiment(conversations, embed_fn, lenses=None,
             K = k
         valid_k[cid] = K
         E = np.asarray(embed_fn([m["content"] for m in msgs]), dtype=float)
+        if E.shape[0] != len(msgs):
+            raise ValueError(
+                f"embed_fn returned {E.shape[0]} rows for {len(msgs)} "
+                f"messages in conversation {cid!r}"
+            )
         E = E / (np.linalg.norm(E, axis=1, keepdims=True) + EPS)
         P = np.asarray(embed_fn([prefix(msgs, k) for k in range(1, K + 1)]), dtype=float)
         if K > 0:
+            if P.shape[0] != K:
+                raise ValueError(
+                    f"embed_fn returned {P.shape[0]} rows for {K} "
+                    f"prefixes in conversation {cid!r}"
+                )
             P = P / (np.linalg.norm(P, axis=1, keepdims=True) + EPS)
         msg_embs[cid], pre_embs[cid] = E, P
 

@@ -1,9 +1,16 @@
 """Backend tests: cache + protocol. No network access anywhere."""
+import hashlib
+
 import numpy as np
 import pytest
 
 import embflow as ef
 from embflow.backends import _require
+
+
+def _seed(text):
+    """Process-stable seed (built-in hash() varies with PYTHONHASHSEED)."""
+    return int.from_bytes(hashlib.sha256(text.encode()).digest()[:4], "big")
 
 
 def make_fake_embed(d=8):
@@ -15,7 +22,7 @@ def make_fake_embed(d=8):
         calls["texts"].extend(texts)
         out = []
         for t in texts:
-            rng = np.random.default_rng(abs(hash(t)) % (2**32))
+            rng = np.random.default_rng(_seed(t))
             out.append(rng.standard_normal(d))
         return np.asarray(out, dtype=np.float32)
 
@@ -61,6 +68,15 @@ class TestCachedEmbedFn:
         out = cached([])
         assert out.shape[0] == 0
         assert calls["n"] == 0
+
+    def test_wrong_row_count_raises_clear_error(self, tmp_path):
+        """A misbehaving embed_fn fails loudly, not with a bare KeyError."""
+        bad = ef.cached_embed_fn(
+            lambda texts: np.ones((len(texts) - 1, 4), dtype=np.float32),
+            tmp_path / "c.sqlite", "t",
+        )
+        with pytest.raises(ValueError, match="1 rows for 2 texts"):
+            bad(["a", "b"])
 
     def test_persists_across_instances(self, tmp_path):
         embed, calls = make_fake_embed()

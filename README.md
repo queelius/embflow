@@ -63,6 +63,12 @@ dist = ef.trajectory_distance(traj, traj, method="dtw")
 G = ef.velocity_gram(vectors)      # rotation/translation-invariant geometry
 
 # Validate an embedding model against the prefix path.
+conversations = [
+    [{"role": "user", "content": "embeddings as paths"},
+     {"role": "assistant", "content": "trajectories, lenses, motion"}],
+    [{"role": "user", "content": "an unrelated topic"},
+     {"role": "assistant", "content": "entirely different content"}],
+]
 emb_fn = ef.openai_embed_fn(cache_path="emb.sqlite")   # or ollama_embed_fn
 result = ef.prefix_experiment(conversations, emb_fn)   # gate + curves
 ```

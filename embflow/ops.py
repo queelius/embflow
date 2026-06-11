@@ -23,7 +23,10 @@ EPS = 1e-8
 
 # Adaptive-alpha grid from the embedding-dynamics paper's motionlib:
 # 0.05..0.95 in steps of 0.05, plus 0.999 (near-running-mean).
+# Read-only: adaptive_alpha aliases it without copying, so a writable
+# global would let external mutation silently poison every future fit.
 ALPHA_GRID = np.concatenate([np.arange(0.05, 1.00, 0.05), [0.999]])
+ALPHA_GRID.setflags(write=False)
 ALPHA_MAX_MESSAGES = 400
 
 
@@ -604,8 +607,11 @@ def adaptive_alpha(vectors, grid=None, max_messages=ALPHA_MAX_MESSAGES):
     vectors : ndarray of shape (n, d)
     grid : ndarray, optional
         Candidate alphas. Default ``ALPHA_GRID``
-        (0.05..0.95 step 0.05, plus 0.999). Ties resolve to the FIRST
-        (lowest) grid value.
+        (0.05..0.95 step 0.05, plus 0.999). Exact ties resolve to the
+        first grid value, but in practice the EPS-guarded normalization
+        scores norm/(norm+EPS) and higher alpha accumulates a
+        larger-norm state, so near-ties tilt toward LONGER memory (a
+        constant sequence fits 0.999, identical to motionlib).
     max_messages : int or None
         Cap on sequence length for cost control (default 400,
         motionlib's documented cap). None = no cap.
@@ -666,7 +672,7 @@ def motion_signature(vectors, window=8, with_alpha=True):
         "speed_std": float(s.std()) if len(s) else float("nan"),
         "turn_mean": float(t_ok.mean()) if len(t_ok) else float("nan"),
         "turn_std": float(t_ok.std()) if len(t_ok) else float("nan"),
-        "speed_ac1": speed_autocorr(vectors, lag=1),
+        "speed_ac1": _lag_autocorr(s, lag=1),
         f"tortuosity_w{window}": tortuosity(vectors, window),
     }
     if with_alpha:

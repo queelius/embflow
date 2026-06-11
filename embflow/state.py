@@ -88,6 +88,8 @@ def leaky_state(vectors, alpha=0.85, masses=None):
     vectors = np.asarray(vectors, dtype=float)
     if len(vectors) == 0:
         raise ValueError("leaky_state requires at least one vector")
+    if not 0.0 < alpha <= 1.0:
+        raise ValueError(f"alpha must be in (0, 1], got {alpha}")
     if masses is None:
         masses = np.ones(len(vectors))
     masses = np.asarray(masses, dtype=float)

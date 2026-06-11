@@ -1,4 +1,6 @@
 """Tests for the prefix-validation protocol (exp04 port)."""
+import hashlib
+
 import numpy as np
 import pytest
 
@@ -7,7 +9,9 @@ from embflow.validate import accumulate, _approx_token_len, _default_prefix
 
 
 def hash_vec(text, d=32):
-    rng = np.random.default_rng(abs(hash(text)) % (2**32))
+    # sha256-derived seed: process-stable (hash() varies with PYTHONHASHSEED).
+    seed = int.from_bytes(hashlib.sha256(text.encode()).digest()[:4], "big")
+    rng = np.random.default_rng(seed)
     v = rng.standard_normal(d)
     return v / np.linalg.norm(v)
 
@@ -158,6 +162,12 @@ class TestPrefixExperimentEdges:
         convs[0] = []
         with pytest.raises(ValueError, match="empty"):
             ef.prefix_experiment(convs, linear_embed)
+
+    def test_wrong_embed_row_count_raises(self):
+        convs = make_conversations(2, 6)
+        drop_last = lambda texts: linear_embed(texts)[:-1]
+        with pytest.raises(ValueError, match="rows for"):
+            ef.prefix_experiment(convs, drop_last, n_nulls=10)
 
     def test_alpha_coherence_without_mass_lenses(self):
         """exp lenses without mass variants: the fallback list is used."""

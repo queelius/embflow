@@ -478,6 +478,12 @@ class TestAdaptiveAlpha:
         truncated = ef.adaptive_alpha(vecs[:20])
         assert capped == truncated
 
+    def test_default_grid_is_immutable(self):
+        # adaptive_alpha aliases ALPHA_GRID without copying; a writable
+        # global would let accidental mutation poison every future fit.
+        with pytest.raises(ValueError):
+            ef.ALPHA_GRID[0] = 0.5
+
 
 class TestStructuralRichness:
     def test_returns_float(self, vectors):
