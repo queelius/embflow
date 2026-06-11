@@ -81,3 +81,8 @@ from embflow.backends import (
     openai_embed_fn,
     ollama_embed_fn,
 )
+from embflow.validate import (
+    lens_weights,
+    default_lenses,
+    prefix_experiment,
+)
