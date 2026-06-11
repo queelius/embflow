@@ -47,6 +47,33 @@ def _normalized(embed_fn):
     return _embed
 
 
+def _batched(embed_batch, batch_size):
+    """Lift a one-batch embedder (list[str] -> list of vectors) into an
+    embed_fn: batching loop, empty-input guard, float32 stacking."""
+
+    def _embed(texts):
+        texts = list(texts)
+        if not texts:
+            return np.zeros((0, 0), dtype=np.float32)
+        out = []
+        for start in range(0, len(texts), batch_size):
+            out.extend(embed_batch(texts[start:start + batch_size]))
+        return np.asarray(out, dtype=np.float32)
+
+    return _embed
+
+
+def _provider(embed_batch, batch_size, cache_path, namespace, normalize):
+    """Shared provider wiring: batching, then optional content-hash cache
+    (raw vectors), then optional unit-normalized readout."""
+    fn = _batched(embed_batch, batch_size)
+    if cache_path is not None:
+        fn = cached_embed_fn(fn, cache_path, namespace)
+    if normalize:
+        fn = _normalized(fn)
+    return fn
+
+
 def cached_embed_fn(embed_fn, cache_path, namespace):
     """Wrap any embed_fn with a sqlite content-hash cache.
 
@@ -119,25 +146,14 @@ def openai_embed_fn(model="text-embedding-3-small", dimensions=256,
     openai = _require("openai", "openai")
     client = openai.OpenAI()
 
-    def _embed(texts):
-        texts = list(texts)
-        if not texts:
-            return np.zeros((0, 0), dtype=np.float32)
-        out = []
-        for start in range(0, len(texts), batch_size):
-            batch = texts[start:start + batch_size]
-            resp = client.embeddings.create(
-                model=model, input=batch, dimensions=dimensions
-            )
-            out.extend(item.embedding for item in resp.data)
-        return np.asarray(out, dtype=np.float32)
+    def embed_batch(batch):
+        resp = client.embeddings.create(
+            model=model, input=batch, dimensions=dimensions
+        )
+        return [item.embedding for item in resp.data]
 
-    fn = _embed
-    if cache_path is not None:
-        fn = cached_embed_fn(fn, cache_path, f"openai|{model}|{dimensions}")
-    if normalize:
-        fn = _normalized(fn)
-    return fn
+    return _provider(embed_batch, batch_size, cache_path,
+                     f"openai|{model}|{dimensions}", normalize)
 
 
 def ollama_embed_fn(model="nomic-embed-text", host=None,
@@ -151,20 +167,8 @@ def ollama_embed_fn(model="nomic-embed-text", host=None,
     ollama = _require("ollama", "ollama")
     client = ollama.Client(host=host) if host else ollama.Client()
 
-    def _embed(texts):
-        texts = list(texts)
-        if not texts:
-            return np.zeros((0, 0), dtype=np.float32)
-        out = []
-        for start in range(0, len(texts), batch_size):
-            batch = texts[start:start + batch_size]
-            resp = client.embed(model=model, input=batch)
-            out.extend(resp["embeddings"])
-        return np.asarray(out, dtype=np.float32)
+    def embed_batch(batch):
+        return client.embed(model=model, input=batch)["embeddings"]
 
-    fn = _embed
-    if cache_path is not None:
-        fn = cached_embed_fn(fn, cache_path, f"ollama|{model}")
-    if normalize:
-        fn = _normalized(fn)
-    return fn
+    return _provider(embed_batch, batch_size, cache_path,
+                     f"ollama|{model}", normalize)

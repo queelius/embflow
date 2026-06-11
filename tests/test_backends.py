@@ -88,6 +88,33 @@ class TestCachedEmbedFn:
         assert out.shape == (1, 8)
 
 
+class TestProviderWiring:
+    """The shared _provider chain (batching -> cache -> normalize) without network."""
+
+    def test_batches_cache_and_normalize_compose(self, tmp_path):
+        from embflow.backends import _provider
+        batches = []
+
+        def embed_batch(batch):
+            batches.append(list(batch))
+            return [[2.0, 0.0, 0.0, 0.0] for _ in batch]
+
+        fn = _provider(embed_batch, batch_size=2, cache_path=tmp_path / "c.sqlite",
+                       namespace="fake|4", normalize=True)
+        out = fn(["a", "b", "c"])
+        assert batches == [["a", "b"], ["c"]]            # batch_size respected
+        np.testing.assert_allclose(np.linalg.norm(out, axis=1), 1.0, atol=1e-6)
+        batches.clear()
+        fn(["a", "b", "c"])                              # second call: pure cache
+        assert batches == []
+
+    def test_empty_input(self):
+        from embflow.backends import _provider
+        fn = _provider(lambda b: [], batch_size=8, cache_path=None,
+                       namespace="x", normalize=True)
+        assert fn([]).size == 0
+
+
 class TestRequire:
     def test_missing_module_raises_with_hint(self):
         with pytest.raises(RuntimeError, match="pip install some-package"):
