@@ -75,3 +75,9 @@ from embflow.compare import (
     velocity_gram,
     continuation_score,
 )
+from embflow.backends import (
+    EmbedFn,
+    cached_embed_fn,
+    openai_embed_fn,
+    ollama_embed_fn,
+)
