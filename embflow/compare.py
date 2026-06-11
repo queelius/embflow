@@ -141,6 +141,34 @@ def _endpoint_distance(a, b):
     return (d_start + d_end) / 2
 
 
+def velocity_gram(trajectory):
+    """Gram matrix of velocity vectors: G[i, j] = <v_i, v_j>.
+
+    Invariant under global rotation and translation of the trajectory —
+    it captures the INTERNAL geometry of the motion (the RSA/CKA-style
+    comparison level). diag(G) = speed^2; off-diagonals encode turning
+    structure. Compare two sequences' Gram matrices to ask "do they move
+    the same way" without requiring them to live in the same region of
+    embedding space.
+
+    Scope note (validated 2026-06-10): LOCAL cross-topic motion motifs
+    tested NEGATIVE at scalar-channel representation; sequence-LEVEL
+    signatures (``motion_signature``) and arc-scale structure are where
+    the signal is. The Gram matrix preserves the directional structure
+    that scalar channels discard.
+
+    Parameters
+    ----------
+    trajectory : ndarray of shape (n, d)
+
+    Returns
+    -------
+    ndarray of shape (n-1, n-1); (0, 0) for trajectories shorter than 2.
+    """
+    v = np.diff(np.asarray(trajectory, dtype=float), axis=0)
+    return v @ v.T
+
+
 def continuation_score(vectors_a, vectors_b, alpha=0.85):
     """Score how well sequence B continues from sequence A.
 

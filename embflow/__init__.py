@@ -72,5 +72,6 @@ from embflow.nulls import (
 )
 from embflow.compare import (
     trajectory_distance,
+    velocity_gram,
     continuation_score,
 )

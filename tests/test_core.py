@@ -538,6 +538,30 @@ class TestShapeAndEndpointDistance:
         assert ef.trajectory_distance(a, a, method="shape") == 1.0
 
 
+class TestVelocityGram:
+    def test_shape(self, vectors):
+        G = ef.velocity_gram(vectors)
+        assert G.shape == (len(vectors) - 1, len(vectors) - 1)
+
+    def test_diag_is_squared_speed(self, vectors):
+        G = ef.velocity_gram(vectors)
+        np.testing.assert_allclose(np.diag(G), ef.speed(vectors) ** 2, atol=1e-9)
+
+    def test_rotation_and_translation_invariant(self, vectors):
+        rng = np.random.default_rng(5)
+        Q, _ = np.linalg.qr(rng.standard_normal((vectors.shape[1],) * 2))
+        moved = vectors @ Q.T + 0.7
+        np.testing.assert_allclose(
+            ef.velocity_gram(moved), ef.velocity_gram(vectors), atol=1e-9
+        )
+
+    def test_permutation_sensitive(self, vectors):
+        perm = np.random.default_rng(6).permutation(len(vectors))
+        assert not np.allclose(
+            ef.velocity_gram(vectors[perm]), ef.velocity_gram(vectors), atol=1e-3
+        )
+
+
 class TestContinuationScore:
     def test_identical_sequence_high_score(self, vectors):
         assert ef.continuation_score(vectors, vectors) > 0.5
