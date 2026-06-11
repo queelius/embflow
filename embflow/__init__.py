@@ -64,6 +64,12 @@ from embflow.ops import (
     motion_signature,
     structural_richness,
 )
+from embflow.nulls import (
+    shuffle,
+    role_slot_shuffle,
+    null_corrected,
+    paired_stats,
+)
 from embflow.compare import (
     trajectory_distance,
     continuation_score,
