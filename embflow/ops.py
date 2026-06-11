@@ -630,6 +630,49 @@ def adaptive_alpha(vectors, grid=None, max_messages=ALPHA_MAX_MESSAGES):
     return float(grid[int(np.argmax(scores))])
 
 
+def motion_signature(vectors, window=8, with_alpha=True):
+    """Per-sequence scalar "gait" features for sequence-level comparison.
+
+    The feature dict from the embedding-dynamics paper's motionlib
+    (motion_scalars), validated 2026-06-10. Use it to compare HOW
+    sequences move rather than WHERE they are; order effect sizes
+    real vs shuffled: speed d = -2.03, tortuosity d = +1.39,
+    alpha_hat d = -1.83. Composition alone also moves these statistics
+    — report them null-corrected via ``embflow.nulls.null_corrected``.
+
+    Keys: speed_mean, speed_std, turn_mean, turn_std, speed_ac1,
+    tortuosity_w{window}, and alpha_hat when ``with_alpha``.
+
+    Parameters
+    ----------
+    vectors : ndarray of shape (n, d)
+        Raw embedding sequence (not a smoothed trajectory).
+    window : int
+        Tortuosity window (default 8, the validated setting).
+    with_alpha : bool
+        Include ``alpha_hat`` (adds an O(n * grid) fit).
+
+    Returns
+    -------
+    dict[str, float] — NaN entries on degenerate input.
+    """
+    vectors = np.asarray(vectors, dtype=float)
+    s = speed(vectors)
+    t = turning_cosines(vectors)
+    t_ok = t[~np.isnan(t)]
+    out = {
+        "speed_mean": float(s.mean()) if len(s) else float("nan"),
+        "speed_std": float(s.std()) if len(s) else float("nan"),
+        "turn_mean": float(t_ok.mean()) if len(t_ok) else float("nan"),
+        "turn_std": float(t_ok.std()) if len(t_ok) else float("nan"),
+        "speed_ac1": speed_autocorr(vectors, lag=1),
+        f"tortuosity_w{window}": tortuosity(vectors, window),
+    }
+    if with_alpha:
+        out["alpha_hat"] = adaptive_alpha(vectors)
+    return out
+
+
 def structural_richness(vectors, weight_fns=None, meta=None):
     """Inter-projection divergence: how much do different weightings disagree?
 

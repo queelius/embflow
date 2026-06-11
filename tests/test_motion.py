@@ -116,3 +116,69 @@ class TestAdaptiveAlphaConvention:
         vecs = np.concatenate(blocks)
         vecs /= np.linalg.norm(vecs, axis=1, keepdims=True)
         assert ef.adaptive_alpha(vecs) <= 0.6
+
+
+def _fixture_input(fix):
+    rng = np.random.default_rng(fix["seed"])
+    E = rng.standard_normal((fix["n"], fix["d"]))
+    return E / np.linalg.norm(E, axis=1, keepdims=True)
+
+
+class TestMotionSignature:
+    def test_keys_and_types(self, vectors):
+        sig = ef.motion_signature(vectors)
+        assert set(sig) == {
+            "speed_mean", "speed_std", "turn_mean", "turn_std",
+            "speed_ac1", "tortuosity_w8", "alpha_hat",
+        }
+        assert all(isinstance(v, float) for v in sig.values())
+
+    def test_window_in_key(self, vectors):
+        sig = ef.motion_signature(vectors, window=4)
+        assert "tortuosity_w4" in sig
+
+    def test_without_alpha(self, vectors):
+        assert "alpha_hat" not in ef.motion_signature(vectors, with_alpha=False)
+
+
+class TestMotionlibFidelity:
+    """Acceptance criterion 4: outputs match motionlib on the same input."""
+
+    @pytest.fixture(scope="class")
+    def fix(self):
+        return json.loads(FIXTURE.read_text())
+
+    @pytest.fixture(scope="class")
+    def E(self, fix):
+        return _fixture_input(fix)
+
+    def test_motion_signature_matches_motion_scalars(self, fix, E):
+        sig = ef.motion_signature(E, window=8, with_alpha=True)
+        for key, expected in fix["motion_scalars"].items():
+            np.testing.assert_allclose(sig[key], expected, atol=1e-9, err_msg=key)
+
+    def test_turning_cosines(self, fix, E):
+        np.testing.assert_allclose(
+            ef.turning_cosines(E)[:5], fix["turning_cosines_first5"], atol=1e-9
+        )
+
+    def test_tortuosity(self, fix, E):
+        np.testing.assert_allclose(ef.tortuosity(E, 8), fix["tortuosity_w8"], atol=1e-9)
+
+    def test_speeds(self, fix, E):
+        np.testing.assert_allclose(ef.speed(E)[:5], fix["speeds_first5"], atol=1e-9)
+
+    def test_speed_autocorr(self, fix, E):
+        np.testing.assert_allclose(
+            ef.speed_autocorr(E, lag=1), fix["lag1_autocorr_speeds"], atol=1e-9
+        )
+
+    def test_adaptive_alpha(self, fix, E):
+        np.testing.assert_allclose(ef.adaptive_alpha(E), fix["adaptive_alpha"], atol=1e-12)
+
+    def test_trajectory_matches_smoothed_trajectory(self, fix, E):
+        np.testing.assert_allclose(
+            ef.trajectory(E, 0.85)[-1],
+            fix["smoothed_trajectory_alpha085_last"],
+            atol=1e-6,  # motionlib normalizes with +EPS, embflow with where>0
+        )

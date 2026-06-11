@@ -61,6 +61,7 @@ from embflow.ops import (
     segment,
     auto_segment,
     adaptive_alpha,
+    motion_signature,
     structural_richness,
 )
 from embflow.compare import (
