@@ -101,18 +101,26 @@ def smooth_gaussian(vectors, focus=0.5, sigma=None):
     return result
 
 
-def smooth_time_decay(vectors, times, half_life_seconds):
+def smooth_time_decay(vectors, times, half_life_seconds, masses=None):
     """Time-decay running projection anchored to max(times[:k+1]) at each step.
 
     O(n^2): the reference time changes with the prefix, so weights are
-    recomputed per step.
+    recomputed per step. Optional ``masses`` (e.g. token counts) multiply
+    pointwise into the time-decay weights — mass and time decay compose
+    under the same numpy ``*`` monoid as all other weights.
     """
     if len(vectors) == 0:
         raise ValueError("smooth_time_decay requires at least one vector")
     n = len(vectors)
     times = np.asarray(times, dtype=float)
+    if masses is not None:
+        masses = np.asarray(masses, dtype=float)
+        if masses.shape != (n,):
+            raise ValueError(f"masses must have shape ({n},), got {masses.shape}")
     result = np.empty_like(vectors, dtype=float)
     for k in range(n):
         w = time_decay_weights(times[:k + 1], half_life_seconds)
+        if masses is not None:
+            w = w * masses[:k + 1]
         result[k] = weighted_mean(vectors[:k + 1], w)
     return result

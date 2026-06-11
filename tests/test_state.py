@@ -105,6 +105,24 @@ class TestPermutationProperties:
         assert d_low > d_high        # more sensitive at lower alpha
 
 
+class TestTimeDecayMassComposition:
+    def test_masses_multiply_into_time_decay_weights(self, vectors):
+        """Unified mass + time decay: weights compose by numpy *."""
+        times = np.linspace(0, 5000, len(vectors))
+        m = np.arange(1, len(vectors) + 1, dtype=float)
+        traj = ef.smooth_time_decay(vectors, times, 3600, masses=m)
+        for k in range(len(vectors)):
+            w = ef.time_decay_weights(times[: k + 1], 3600) * m[: k + 1]
+            expected = ef.weighted_mean(vectors[: k + 1], w)
+            np.testing.assert_allclose(traj[k], expected, atol=1e-9)
+
+    def test_no_masses_unchanged(self, vectors):
+        times = np.linspace(0, 5000, len(vectors))
+        a = ef.smooth_time_decay(vectors, times, 3600)
+        b = ef.smooth_time_decay(vectors, times, 3600, masses=np.ones(len(vectors)))
+        np.testing.assert_allclose(a, b, atol=1e-12)
+
+
 class TestHalfLife:
     def test_round_trip(self):
         for alpha in [0.5, 0.85, 0.99]:
