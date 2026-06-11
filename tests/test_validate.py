@@ -145,3 +145,25 @@ class TestPrefixExperiment:
             {"role": "assistant", "content": "hi"},
         ]
         assert _default_prefix(msgs, 2) == "[user]: hello\n\n[assistant]: hi"
+
+
+class TestPrefixExperimentEdges:
+    def test_mismatched_ids_raise(self):
+        convs = make_conversations(2, 6)
+        with pytest.raises(ValueError, match="ids"):
+            ef.prefix_experiment(convs, linear_embed, ids=["only-one"])
+
+    def test_empty_conversation_raises(self):
+        convs = make_conversations(2, 6)
+        convs[0] = []
+        with pytest.raises(ValueError, match="empty"):
+            ef.prefix_experiment(convs, linear_embed)
+
+    def test_alpha_coherence_without_mass_lenses(self):
+        """exp lenses without mass variants: the fallback list is used."""
+        lenses = [("uniform", "uniform", 0.0, False),
+                  ("exp0.8", "exp", 0.8, False)]
+        convs = make_conversations(2, 6)
+        res = ef.prefix_experiment(convs, linear_embed, lenses=lenses, n_nulls=10)
+        for entry in res["alpha_coherence"]:
+            assert entry["best_fit_alpha"] == 0.8

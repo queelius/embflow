@@ -624,3 +624,32 @@ class TestEmptyInput:
     def test_structural_richness_empty_raises(self):
         with pytest.raises(ValueError):
             ef.structural_richness(np.zeros((0, 4)))
+
+
+class TestSmootherInvariant:
+    """Documented invariant: smooth_x(vectors)[-1] == weighted_mean(vectors, x_weights(n))."""
+
+    def test_reverse_exponential_matches_prefix_weighted_mean(self, vectors):
+        alpha = 0.85
+        traj = ef.smooth_reverse_exponential(vectors, alpha)
+        for j in range(len(vectors)):
+            w = ef.reverse_exponential_weights(j + 1, alpha)
+            expected = ef.weighted_mean(vectors[:j + 1], w)
+            np.testing.assert_allclose(traj[j], expected, atol=1e-9)
+
+    def test_gaussian_last_matches_weighted_mean(self, vectors):
+        traj = ef.smooth_gaussian(vectors, focus=0.5, sigma=2.0)
+        expected = ef.weighted_mean(
+            vectors, ef.gaussian_weights(len(vectors), focus=0.5, sigma=2.0)
+        )
+        np.testing.assert_allclose(traj[-1], expected, atol=1e-9)
+
+    def test_gaussian_empty_raises(self):
+        with pytest.raises(ValueError):
+            ef.smooth_gaussian(np.zeros((0, 4)))
+
+    def test_time_decay_last_matches_weighted_mean(self, vectors, meta):
+        times = [m["timestamp"] for m in meta]
+        traj = ef.smooth_time_decay(vectors, times, 60.0)
+        expected = ef.weighted_mean(vectors, ef.time_decay_weights(times, 60.0))
+        np.testing.assert_allclose(traj[-1], expected, atol=1e-9)

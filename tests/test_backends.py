@@ -104,3 +104,16 @@ class TestProviderFactories:
         monkeypatch.setattr(builtins, "__import__", block)
         with pytest.raises(RuntimeError, match="pip install ollama"):
             ef.ollama_embed_fn()
+
+
+class TestNormalized:
+    def test_rows_come_back_unit(self):
+        from embflow.backends import _normalized
+        fn = _normalized(lambda texts: np.full((len(texts), 4), 2.0))
+        out = fn(["a", "b"])
+        np.testing.assert_allclose(np.linalg.norm(out, axis=1), 1.0, atol=1e-6)
+
+    def test_empty_passthrough(self):
+        from embflow.backends import _normalized
+        fn = _normalized(lambda texts: np.zeros((0, 0), dtype=np.float32))
+        assert fn([]).size == 0
