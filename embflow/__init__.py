@@ -37,6 +37,12 @@ from embflow.smooth import (
     smooth_gaussian,
     smooth_time_decay,
 )
+from embflow.state import (
+    leaky_state,
+    trajectory,
+    alpha_to_half_life,
+    half_life_to_alpha,
+)
 from embflow.ops import (
     velocity,
     curvature,
