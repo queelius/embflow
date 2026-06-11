@@ -582,47 +582,52 @@ def _recursive_changepoints(vectors, alpha, threshold, min_size, offset=0,
 
 # === Adaptive analysis ===
 
-def adaptive_alpha(vectors, alpha_range=(0.3, 0.99), step=0.05):
-    """Estimate the optimal alpha for a sequence.
+def adaptive_alpha(vectors, grid=None, max_messages=ALPHA_MAX_MESSAGES):
+    """argmax over a grid of mean_k cos(x_{k-1}(alpha), e_k).
 
-    Finds the alpha that best predicts the next vector from the
-    exponentially-smoothed trajectory. Measures the natural
-    "memory length" of the sequence.
+    Finds the alpha whose accumulated state best predicts the next
+    vector, i.e. the natural memory length of the sequence.
 
-    On ties (e.g., a near-constant sequence where every alpha predicts
-    perfectly), returns the grid value closest to the default 0.85.
+    Lens convention w(j,k) = alpha^(k-j): state s_k = alpha*s_{k-1} + e_k,
+    readout x_k = s_k/||s_k||. HIGHER alpha = LONGER memory; alpha -> 1
+    approaches the running mean. Half-life h = log(0.5)/log(alpha).
+
+    Ported from the embedding-dynamics motionlib (validated 2026-06-10
+    on 1,768 conversations: ChatGPT 0.78 vs Claude Code 0.84 on
+    text-embedding-3-small; 0.76/0.83 on nomic — the ordering
+    replicates across embedding models). Order matters: shuffling
+    pushes alpha toward 1 (paired Cohen's d = -1.83 real vs shuffled).
 
     Parameters
     ----------
     vectors : ndarray of shape (n, d)
-    alpha_range : tuple (low, high)
-    step : float
+    grid : ndarray, optional
+        Candidate alphas. Default ``ALPHA_GRID``
+        (0.05..0.95 step 0.05, plus 0.999). Ties resolve to the FIRST
+        (lowest) grid value.
+    max_messages : int or None
+        Cap on sequence length for cost control (default 400,
+        motionlib's documented cap). None = no cap.
 
     Returns
     -------
-    float
-        Optimal alpha, guaranteed within [alpha_range[0], alpha_range[1]].
+    float — a grid value, or NaN when n < 3.
     """
-    if len(vectors) < 5:
-        return 0.85
-
-    # np.arange can overshoot the upper bound by a float epsilon; clamp.
-    grid = np.arange(alpha_range[0], alpha_range[1] + step / 2, step)
-    grid = np.minimum(grid, alpha_range[1])
-
-    scores = np.empty(len(grid))
-    for idx, alpha in enumerate(grid):
-        traj = smooth_exponential(vectors, alpha)
-        scores[idx] = np.mean([
-            _cos_sim_scalar(traj[j], vectors[j + 1])
-            for j in range(len(vectors) - 1)
-        ])
-
-    best = scores.max()
-    tied = np.flatnonzero(scores >= best - 1e-9)
-    # Tiebreak toward the default 0.85.
-    idx = tied[np.argmin(np.abs(grid[tied] - 0.85))]
-    return float(grid[idx])
+    vectors = np.asarray(vectors, dtype=float)
+    if grid is None:
+        grid = ALPHA_GRID
+    grid = np.asarray(grid, dtype=float)
+    E = vectors if max_messages is None else vectors[:max_messages]
+    n = len(E)
+    if n < 3:
+        return float("nan")
+    S = np.repeat(E[0][None, :].astype(np.float64), len(grid), axis=0)
+    scores = np.zeros(len(grid))
+    for k in range(1, n):
+        Xn = S / (np.linalg.norm(S, axis=1, keepdims=True) + EPS)
+        scores += Xn @ E[k].astype(np.float64)
+        S = grid[:, None] * S + E[k][None, :]
+    return float(grid[int(np.argmax(scores))])
 
 
 def structural_richness(vectors, weight_fns=None, meta=None):

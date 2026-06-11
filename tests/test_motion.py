@@ -93,3 +93,26 @@ class TestSpeedAutocorr:
 
     def test_too_short_is_nan(self):
         assert np.isnan(ef.speed_autocorr(np.zeros((3, 2))))
+
+
+class TestAdaptiveAlphaConvention:
+    def test_slow_drift_prefers_long_memory(self):
+        """A sequence hugging a fixed direction with noise: the running
+        mean is the best predictor, so alpha should land high."""
+        rng = np.random.default_rng(5)
+        base = np.array([1.0] + [0.0] * 15)
+        vecs = base + 0.2 * rng.standard_normal((60, 16))
+        vecs /= np.linalg.norm(vecs, axis=1, keepdims=True)
+        assert ef.adaptive_alpha(vecs) >= 0.9
+
+    def test_jumpy_sequence_prefers_short_memory(self):
+        """Blockwise topic jumps: old state mispredicts, alpha lands low."""
+        rng = np.random.default_rng(6)
+        blocks = []
+        for b in range(10):
+            e = np.zeros(16)
+            e[b] = 1.0
+            blocks.append(e + 0.05 * rng.standard_normal((3, 16)))
+        vecs = np.concatenate(blocks)
+        vecs /= np.linalg.norm(vecs, axis=1, keepdims=True)
+        assert ef.adaptive_alpha(vecs) <= 0.6

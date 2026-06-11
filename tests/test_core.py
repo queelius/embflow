@@ -450,22 +450,33 @@ class TestAutoSegmentWindow:
 # === Adaptive analysis ===
 
 class TestAdaptiveAlpha:
-    def test_returns_float(self, vectors):
+    def test_returns_grid_value(self, vectors):
         alpha = ef.adaptive_alpha(vectors)
         assert isinstance(alpha, float)
-        assert 0 < alpha < 1
+        assert any(abs(alpha - g) < 1e-12 for g in ef.ALPHA_GRID)
 
-    def test_constant_sequence_does_not_return_range_extreme(self):
-        # Every alpha predicts perfectly; the tiebreak should not force
-        # the extreme low-end value.
+    def test_short_sequence_is_nan(self):
+        assert np.isnan(ef.adaptive_alpha(np.zeros((2, 4))))
+
+    def test_constant_sequence_prefers_longest_memory(self):
+        # Every alpha predicts a constant sequence almost perfectly; the
+        # EPS-guarded normalization scores norm/(norm+EPS), and higher
+        # alpha accumulates a larger-norm state, so near-ties resolve
+        # toward the LONGEST memory (verified identical to motionlib).
         const = np.tile([1.0, 0.0, 0.0, 0.0], (10, 1))
-        assert ef.adaptive_alpha(const) > 0.3 + 1e-9
+        assert abs(ef.adaptive_alpha(const) - ef.ALPHA_GRID[-1]) < 1e-12
 
-    def test_returns_within_grid(self):
-        vecs = np.random.default_rng(0).standard_normal((20, 8))
+    def test_custom_grid(self, vectors):
+        grid = np.array([0.5, 0.9])
+        assert ef.adaptive_alpha(vectors, grid=grid) in (0.5, 0.9)
+
+    def test_max_messages_cap(self):
+        rng = np.random.default_rng(3)
+        vecs = rng.standard_normal((50, 8))
         vecs /= np.linalg.norm(vecs, axis=1, keepdims=True)
-        alpha = ef.adaptive_alpha(vecs, alpha_range=(0.3, 0.99), step=0.05)
-        assert 0.3 <= alpha <= 0.99
+        capped = ef.adaptive_alpha(vecs, max_messages=20)
+        truncated = ef.adaptive_alpha(vecs[:20])
+        assert capped == truncated
 
 
 class TestStructuralRichness:
