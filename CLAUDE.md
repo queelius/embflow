@@ -59,7 +59,9 @@ is its unit-row readout. `trajectory(E, alpha)` agrees with
 denominator is a positive scalar and cannot change direction), so the two
 coexist; use `trajectory` when you need masses or raw states.
 `alpha_to_half_life` / `half_life_to_alpha` convert between the two
-parameterizations of memory length.
+parameterizations of memory length. `leaky_state` and `trajectory`
+enforce the documented alpha domain (0, 1] with a ValueError; the
+boundary alpha=1 is valid (running mean).
 
 ### `weights.py`: fold-style primitives
 
@@ -155,7 +157,10 @@ is the motionlib port (vectorized over the grid): argmax of
 Near-ties tilt toward LONGER memory because the EPS-guarded normalization
 scores `norm/(norm+EPS)` and higher alpha accumulates a larger-norm state
 (a constant sequence fits 0.999, identical to motionlib). This EPS
-placement is load-bearing; do not "clean it up".
+placement is load-bearing; do not "clean it up". `ALPHA_GRID` is
+read-only (`setflags(write=False)`): `adaptive_alpha` aliases it
+without copying, so a writable global would let accidental mutation
+silently poison every future fit.
 
 `structural_richness(vectors, weight_fns=None)` computes the mean pairwise
 cosine distance over a set of weighted projections. The default set is
@@ -198,7 +203,13 @@ wraps any embed_fn with a sqlite content-hash cache (namespace MUST encode
 model identity). `openai_embed_fn` / `ollama_embed_fn` import their
 providers lazily and raise RuntimeError with pip hints when missing,
 keeping core embflow numpy-only. Providers cache RAW vectors and
-normalize on the way out.
+normalize on the way out. To add a provider: write a one-batch
+`embed_batch(list[str]) -> vectors` callable and pass it through
+`_provider` (batching -> raw-vector cache -> normalized readout); the
+openai/ollama adapters are each ~6 lines on top of this. Row counts
+from wrapped embed_fns are validated (`cached_embed_fn` and
+`prefix_experiment` raise ValueError on mismatch rather than failing
+downstream with shape errors).
 
 ### `compare.py`: trajectory distances
 
@@ -278,6 +289,10 @@ Conventions:
   smoothers, operators, comparison, public API), `test_state.py`,
   `test_motion.py`, `test_nulls.py`, `test_validate.py`,
   `test_backends.py` (no network anywhere).
+- **Test seeds must be process-stable.** Never seed RNGs from the
+  built-in `hash()` (varies with PYTHONHASHSEED); derive seeds from
+  `hashlib.sha256(text).digest()` as `tests/test_validate.py` and
+  `tests/test_backends.py` do.
 - **All projections normalize to unit length.** `_normalize` (on vectors)
   is duplicated per module; each copy short-circuits on zero-norm.
   Don't consolidate into a shared utility without preserving the

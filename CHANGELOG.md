@@ -24,10 +24,12 @@ embedding-dynamics experiments (2026-06-10, 1,768 conversations).
 
 - `state.py`: `leaky_state` (linear dynamics s_k = alpha*s_{k-1} + m_k*e_k),
   `trajectory` (normalized readout, with mass support),
-  `alpha_to_half_life` / `half_life_to_alpha`.
+  `alpha_to_half_life` / `half_life_to_alpha`. Both state functions
+  enforce the documented alpha domain (0, 1] with a ValueError.
 - `ops.py`: `turning_cosines` (velocity-angle cosines, distinct from
   `angular_velocity`), `tortuosity`, `speed_autocorr`,
-  `motion_signature` (per-sequence gait vector), `ALPHA_GRID`.
+  `motion_signature` (per-sequence gait vector), `ALPHA_GRID`
+  (read-only module constant).
 - `nulls.py`: `shuffle`, `role_slot_shuffle`, `null_corrected`,
   `paired_stats`. Documents the turning-cosine lemma (expected turning
   cosine is exactly -1/2 for exchangeable unit vectors, independent of
@@ -38,7 +40,10 @@ embedding-dynamics experiments (2026-06-10, 1,768 conversations).
   `default_lenses`.
 - `backends.py`: `embed_fn` protocol, `cached_embed_fn` (sqlite
   content-hash cache), `openai_embed_fn`, `ollama_embed_fn` (lazy
-  imports with install hints).
+  imports with install hints; both share one batching/cache/normalize
+  pipeline). Wrapped embed_fns are row-count-validated: a misbehaving
+  embedder raises a clear ValueError instead of failing downstream
+  with shape errors (same check in `prefix_experiment`).
 - `compare.py`: `velocity_gram` (rotation/translation-invariant
   internal geometry).
 - `smooth_time_decay` accepts `masses=` (mass and time decay compose

@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use embflow, please cite it as below."
+title: "embflow: a calculus over embedding sequences"
+type: software
+authors:
+  - family-names: Towell
+    given-names: Alexander
+    orcid: "https://orcid.org/0000-0001-6443-9897"
+    email: lex@metafunctor.com
+version: 0.3.0
+date-released: 2026-06-10
+license: MIT
+repository-code: "https://github.com/queelius/embflow"
+abstract: >-
+  Treats an ordered sequence of embedding vectors as a path in R^d and
+  provides a calculus over such paths: leaky-state trajectories with a
+  documented lens convention, differential and geometric operators,
+  motion statistics, order-vs-composition null models, trajectory
+  distances, and a prefix-validation protocol for embedding models.
+keywords:
+  - embeddings
+  - trajectory
+  - nlp
+  - time-series
+  - semantic-dynamics

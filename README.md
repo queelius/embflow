@@ -8,8 +8,12 @@ calculus in the embedding-dynamics paper.
 ## Install
 
 ```bash
-pip install embflow
+pip install git+https://github.com/queelius/embflow.git
 ```
+
+(Not yet on PyPI.) Runtime deps are numpy and scikit-learn only; the
+OpenAI and Ollama embedding backends are optional
+(`pip install openai` / `pip install ollama`).
 
 ## The lens convention (read this first)
 
@@ -69,8 +73,10 @@ conversations = [
     [{"role": "user", "content": "an unrelated topic"},
      {"role": "assistant", "content": "entirely different content"}],
 ]
-emb_fn = ef.openai_embed_fn(cache_path="emb.sqlite")   # or ollama_embed_fn
+emb_fn = ef.openai_embed_fn(cache_path="emb.sqlite")   # or ollama_embed_fn;
 result = ef.prefix_experiment(conversations, emb_fn)   # gate + curves
+# (openai_embed_fn needs `pip install openai` and OPENAI_API_KEY; any
+#  callable (list[str]) -> (n, d) ndarray works as emb_fn.)
 ```
 
 ## Why null models?
@@ -82,3 +88,15 @@ speed autocorrelation even in shuffled sequences. Raw motion statistics
 conflate composition and order; `ef.null_corrected` separates them.
 Validated order effects on 1,768 real conversations (paired Cohen's d,
 real vs shuffled): speed -2.03, tortuosity +1.39, adaptive alpha -1.83.
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+## License
+
+MIT (see [LICENSE](LICENSE)). Citation metadata in
+[CITATION.cff](CITATION.cff).
