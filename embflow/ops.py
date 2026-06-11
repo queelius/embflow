@@ -437,7 +437,8 @@ def auto_segment(vectors, alpha=0.85, threshold="auto", meta=None,
     ----------
     vectors : ndarray of shape (n, d)
     alpha : float
-        Exponential smoothing factor. Ignored when threshold == "window".
+        Exponential smoothing factor (lens convention w(j,k) = alpha^(k-j):
+        HIGHER alpha = LONGER memory). Ignored when threshold == "window".
     threshold : float, "auto", or "window"
         Peak detection threshold, or the literal "window" to select the
         sliding-window strategy.

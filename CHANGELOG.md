@@ -49,6 +49,13 @@ embedding-dynamics experiments (2026-06-10, 1,768 conversations).
 - motionlib fidelity fixture: `tests/fixtures/motionlib_fixture.json`
   pins the ported operators to the paper's reference implementation.
 
+### Fixed
+
+- `python -m build` was broken since 0.2.0 introduced `experiments/`
+  (setuptools flat-layout auto-discovery found two top-level packages).
+  Package discovery is now explicit (`include = ["embflow*"]`), so
+  `experiments/` stays repo-only and never ships.
+
 ### Notes
 
 - 0.2.0 removed the `Lens` class API (`ef.Uniform()`, `ef.Exponential(alpha)`,

@@ -46,6 +46,12 @@ def smooth_exponential(vectors, alpha=0.85):
         denom_k = alpha * denom_{k-1} + 1
     so result[k] = unit(num_k / denom_k). Matches the old
     ``Exponential(alpha).trajectory(vectors)`` bit-for-bit.
+
+    Lens convention w(j,k) = alpha^(k-j): HIGHER alpha = LONGER memory;
+    alpha -> 1 approaches the running mean; half-life
+    log(0.5)/log(alpha) steps. Equals ``trajectory(vectors, alpha)``
+    (see ``embflow.state``): this form computes the weighted prefix
+    MEAN, whose normalization differs only by a positive scalar.
     """
     if len(vectors) == 0:
         raise ValueError("smooth_exponential requires at least one vector")
@@ -66,6 +72,7 @@ def smooth_reverse_exponential(vectors, alpha=0.85):
 
     result[k] is the unit-normalized weighted mean of ``vectors[0:k+1]``
     with the older items receiving larger weights. O(n).
+    Lens convention: HIGHER alpha = LONGER memory (see smooth_exponential).
     """
     if len(vectors) == 0:
         raise ValueError("smooth_reverse_exponential requires at least one vector")

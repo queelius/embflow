@@ -25,5 +25,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest", "pytest-cov"]
 
+[tool.setuptools.packages.find]
+# experiments/ is repo-only research scaffolding; only embflow ships.
+include = ["embflow*"]
+
 [tool.setuptools.dynamic]
 version = {attr = "embflow.__version__"}

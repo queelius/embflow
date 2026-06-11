@@ -20,8 +20,11 @@ def uniform_weights(n):
 def exponential_weights(n, alpha=0.85):
     """Recency weights: w_k = alpha^(n-1-k) for k=0..n-1.
 
-    The last item has weight 1; older items decay geometrically by
-    ``alpha``. ``alpha=1`` degenerates to uniform weights.
+    The lens convention w(j,k) = alpha^(k-j) evaluated at the final
+    position: the last item has weight 1; older items decay
+    geometrically. HIGHER alpha = LONGER memory; ``alpha=1`` degenerates
+    to uniform weights (the running mean). Half-life: a weight halves
+    every log(0.5)/log(alpha) steps (see ``alpha_to_half_life``).
     """
     return alpha ** np.arange(n - 1, -1, -1)
 
@@ -30,6 +33,8 @@ def reverse_exponential_weights(n, alpha=0.85):
     """Primacy weights: w_k = alpha^k for k=0..n-1.
 
     The first item has weight 1; newer items decay geometrically.
+    Primacy mirror of the lens convention: HIGHER alpha = LONGER memory
+    (more late items retained). Half-life log(0.5)/log(alpha) steps.
     """
     return alpha ** np.arange(n)
 

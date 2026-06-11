@@ -179,6 +179,8 @@ def continuation_score(vectors_a, vectors_b, alpha=0.85):
     ----------
     vectors_a, vectors_b : ndarray of shape (n, d) and (m, d)
     alpha : float
+        Lens decay for both ends (w(j,k) = alpha^(k-j); HIGHER alpha =
+        LONGER memory, half-life log(0.5)/log(alpha) steps).
 
     Returns
     -------
