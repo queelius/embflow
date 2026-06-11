@@ -44,11 +44,13 @@ from embflow.state import (
     half_life_to_alpha,
 )
 from embflow.ops import (
+    ALPHA_GRID,
     velocity,
     curvature,
     jerk,
     speed,
     angular_velocity,
+    turning_cosines,
     arc_length,
     drift,
     local_curvature_radius,

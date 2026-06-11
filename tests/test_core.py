@@ -252,6 +252,13 @@ class TestVelocity:
         const = np.tile([1.0, 0.0, 0.0, 0.0], (5, 1))
         np.testing.assert_allclose(ef.velocity(const), 0, atol=1e-10)
 
+    def test_translation_invariant(self, vectors):
+        """velocities(E + c) == velocities(E)."""
+        c = np.full(vectors.shape[1], 2.5)
+        np.testing.assert_allclose(
+            ef.velocity(vectors + c), ef.velocity(vectors), atol=1e-9
+        )
+
 
 class TestCurvature:
     def test_shape(self, vectors):

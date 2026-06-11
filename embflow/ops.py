@@ -19,6 +19,14 @@ from embflow.weights import (
 )
 
 
+EPS = 1e-8
+
+# Adaptive-alpha grid from the embedding-dynamics paper's motionlib:
+# 0.05..0.95 in steps of 0.05, plus 0.999 (near-running-mean).
+ALPHA_GRID = np.concatenate([np.arange(0.05, 1.00, 0.05), [0.999]])
+ALPHA_MAX_MESSAGES = 400
+
+
 def _normalize(v):
     n = np.linalg.norm(v)
     return v / n if n > 0 else v
@@ -126,6 +134,37 @@ def angular_velocity(trajectory):
     for k in range(n - 1):
         angles[k] = 1 - _cos_sim_scalar(trajectory[k], trajectory[k + 1])
     return angles
+
+
+def turning_cosines(trajectory):
+    """Cosine between consecutive VELOCITY vectors: cos(v_k, v_{k+1}).
+
+    +1 = continuing straight, 0 = right-angle turn, -1 = full reversal.
+    NaN where either velocity is ~0 (consecutive duplicate points).
+
+    NOT the same as ``angular_velocity``, which is 1 - cos between
+    consecutive trajectory POINTS (how far the position rotates);
+    this measures how much the direction of MOTION turns.
+
+    Null fact (see ``embflow.nulls``): for exchangeable unit vectors the
+    expected turning cosine is exactly -1/2, independent of anisotropy.
+
+    Parameters
+    ----------
+    trajectory : ndarray of shape (n, d)
+
+    Returns
+    -------
+    ndarray of shape (n-2,), NaN at degenerate steps.
+    """
+    v = np.diff(np.asarray(trajectory, dtype=float), axis=0)
+    norms = np.linalg.norm(v, axis=1)
+    num = (v[:-1] * v[1:]).sum(axis=1)
+    den = norms[:-1] * norms[1:]
+    out = np.full(len(num), np.nan)
+    ok = den > EPS
+    out[ok] = num[ok] / den[ok]
+    return out
 
 
 # === Global and second-order geometric measures ===
