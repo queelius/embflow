@@ -1,24 +1,32 @@
 """embflow: a calculus over embedding sequences.
 
 Treats an ordered sequence of embedding vectors as a path in R^d.
-Provides weighted folds, scan-style smoothing, differential operators
-(velocity, curvature, jerk, angular velocity, speed), second-order
-geometry (arc length, local curvature radius, velocity covariance),
-segmentation, and trajectory distance.
+
+The core dynamics are a leaky integrator: s_k = alpha*s_{k-1} + m_k*e_k
+(the Euler step of dx/dt = -lambda*x + f(t), alpha = e^(-lambda dt));
+unit normalization x_k = s_k/||s_k|| is a readout for cosine comparison,
+not part of the dynamics. Lens convention everywhere:
+w(j,k) = alpha^(k-j) — HIGHER alpha = LONGER memory, alpha -> 1 is the
+running mean, half-life log(0.5)/log(alpha) steps.
 
 Primary object: an (n, d) ndarray representing a sequence of vectors.
 
 Core operations:
+    leaky_state / trajectory                -> linear state / normalized readout
     weighted_mean(vectors, weights)         -> vector (fold)
     smooth_exponential(vectors, alpha)      -> vectors (O(n) scan)
     velocity / curvature / jerk             -> differential operators
-    arc_length / speed / angular_velocity   -> scalar path metrics
-    local_curvature_radius                  -> osculating-circle radius
-    velocity_covariance                     -> local structure tensor
-    trajectory_distance(a, b, method=...)   -> distance between two paths
+    speed / angular_velocity / turning_cosines -> scalar motion signals
+    tortuosity / speed_autocorr / motion_signature -> per-sequence gait
+    arc_length / drift / local_curvature_radius / velocity_covariance
+    adaptive_alpha                          -> fitted memory length
+    shuffle / role_slot_shuffle / null_corrected -> order-vs-composition nulls
+    trajectory_distance / velocity_gram     -> trajectory comparison
     continuation_score(a, b)                -> does B pick up where A left off?
+    prefix_experiment(convs, embed_fn)      -> the prefix-validation protocol
+    openai_embed_fn / ollama_embed_fn / cached_embed_fn -> embedding backends
 """
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 from embflow.weights import (
     uniform_weights,

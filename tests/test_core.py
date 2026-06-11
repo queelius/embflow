@@ -573,6 +573,23 @@ class TestContinuationScore:
         assert -1 <= score <= 1
 
 
+class TestPublicApi:
+    def test_version(self):
+        assert ef.__version__ == "0.3.0"
+
+    def test_new_symbols_exported(self):
+        for name in [
+            "leaky_state", "trajectory", "alpha_to_half_life",
+            "half_life_to_alpha", "turning_cosines", "tortuosity",
+            "speed_autocorr", "motion_signature", "ALPHA_GRID",
+            "shuffle", "role_slot_shuffle", "null_corrected",
+            "paired_stats", "velocity_gram", "lens_weights",
+            "default_lenses", "prefix_experiment", "EmbedFn",
+            "cached_embed_fn", "openai_embed_fn", "ollama_embed_fn",
+        ]:
+            assert hasattr(ef, name), name
+
+
 # === Edge-case guards ===
 
 class TestEmptyInput:
