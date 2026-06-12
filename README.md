@@ -8,12 +8,12 @@ calculus in the embedding-dynamics paper.
 ## Install
 
 ```bash
-pip install git+https://github.com/queelius/embflow.git
+pip install embflow
 ```
 
-(Not yet on PyPI.) Runtime deps are numpy and scikit-learn only; the
-OpenAI and Ollama embedding backends are optional
-(`pip install openai` / `pip install ollama`).
+Runtime deps are numpy and scikit-learn only; the OpenAI and Ollama
+embedding backends are optional extras
+(`pip install "embflow[openai]"` / `pip install "embflow[ollama]"`).
 
 ## The lens convention (read this first)
 

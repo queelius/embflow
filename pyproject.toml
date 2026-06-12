@@ -9,7 +9,7 @@ description = "A calculus over embedding sequences: weighted folds, smoothers, d
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
-authors = [{name = "Alex Towell"}]
+authors = [{name = "Alex Towell", email = "lex@metafunctor.com"}]
 keywords = ["embeddings", "nlp", "trajectory", "time-series", "semantic"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -24,6 +24,13 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-cov"]
+openai = ["openai"]
+ollama = ["ollama"]
+
+[project.urls]
+Homepage = "https://github.com/queelius/embflow"
+Repository = "https://github.com/queelius/embflow"
+Changelog = "https://github.com/queelius/embflow/blob/master/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 # experiments/ is repo-only research scaffolding; only embflow ships.
